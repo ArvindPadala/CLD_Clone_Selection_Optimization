@@ -1,9 +1,5 @@
 🧬 CLD Clone Selection Optimization Dashboard
 =============================================
-Team: BlackCloud
-Members: 1. Arvind Chary Padala
-         2. Tanishq Sharma
-
 📋 Project Overview
 -------------------
 This enhanced Streamlit-based dashboard simulates and optimizes clone selection workflows in Cell Line Development (CLD). 
