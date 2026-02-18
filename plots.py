@@ -1,16 +1,11 @@
-import matplotlib.pyplot as plt
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-import seaborn as sns
-from simulation import generate_samples, fit_lognormal
+from simulation import generate_samples, fit_lognormal, simulate_workflow
 import pandas as pd
 
-# Set style for matplotlib
-plt.style.use('seaborn-v0_8')
-sns.set_palette("husl")
 
 def plot_criteria_distributions(df, criteria_columns):
     """Plot distributions of criteria columns using plotly."""
@@ -307,40 +302,69 @@ def plot_sensitivity_analysis(sensitivity_results):
     st.dataframe(summary_df, use_container_width=True)
 
 def plot_correlation_heatmap(state):
-    """Plot correlation heatmap showing parameter interactions."""
+    """Plot correlation heatmap showing actual parameter interactions."""
     if "probabilities" not in state:
         return
-    
+
     correlations = state["correlations"]
-    probabilities = state["probabilities"]
-    
-    # Create a matrix for heatmap (example with step parameters)
     settings = state.get("settings", {})
-    step1_range = [int(settings.get("step1_keep", 96) * 0.8), 
-                   settings.get("step1_keep", 96),
-                   int(settings.get("step1_keep", 96) * 1.2)]
-    
-    # Create sample data for heatmap (in real implementation, this would be computed)
-    heatmap_data = np.random.rand(len(step1_range), len(correlations)) * 0.3 + 0.2
-    
+    results = state.get("results", np.array([]))
+
+    if len(results) == 0 or not settings:
+        st.info("Run a simulation first to see the parameter interaction heatmap.")
+        return
+
+    base_step1 = settings.get("step1_keep", 96)
+    step1_range = sorted(set([
+        max(settings.get("step2_keep", 6) + 1, int(base_step1 * 0.7)),
+        base_step1,
+        min(len(results), int(base_step1 * 1.3))
+    ]))
+
+    # Sample a subset of correlations to keep computation fast
+    corr_subset = correlations[::max(1, len(correlations) // 8)]
+    if len(corr_subset) == 0:
+        corr_subset = correlations[:1]
+
+    heatmap_data = np.zeros((len(step1_range), len(corr_subset)))
+
+    with st.spinner("Computing parameter interaction heatmap..."):
+        for i, s1 in enumerate(step1_range):
+            s2 = min(settings.get("step2_keep", 48), s1)
+            s3 = min(settings.get("step3_keep", 6), s2)
+            for j, rho in enumerate(corr_subset):
+                try:
+                    prob, _, _, _ = simulate_workflow(
+                        results, state.get("df", pd.DataFrame()),
+                        settings["top_x_percent"], s1, s2, s3,
+                        float(rho), min(500, settings.get("n_rep", 500)),
+                        settings["dist_method"],
+                        settings.get("criteria_settings", []),
+                        settings.get("apply_criteria_at_step2", False),
+                        settings.get("workflow_steps", 2)
+                    )
+                    heatmap_data[i][j] = prob
+                except Exception:
+                    heatmap_data[i][j] = 0.0
+
     fig = go.Figure(data=go.Heatmap(
         z=heatmap_data,
-        x=correlations,
-        y=step1_range,
+        x=[f"{c:.2f}" for c in corr_subset],
+        y=[str(s) for s in step1_range],
         colorscale='Viridis',
         text=np.round(heatmap_data, 3),
         texttemplate="%{text}",
         textfont={"size": 10},
         colorbar=dict(title="Success Probability")
     ))
-    
+
     fig.update_layout(
-        title="Parameter Interaction Heatmap",
+        title="Parameter Interaction Heatmap (Step 1 Keep × Correlation)",
         xaxis_title="Correlation",
         yaxis_title="Step 1 Keep",
         height=400
     )
-    
+
     st.plotly_chart(fig, use_container_width=True)
 
 def plot_clone_selection_flow(state, settings):

@@ -11,7 +11,8 @@ from plots import (
     plot_workflow_comparison,
     plot_sensitivity_analysis,
     plot_correlation_heatmap,
-    plot_clone_selection_flow
+    plot_clone_selection_flow,
+    plot_efficiency_metrics
 )
 from simulation import simulate_workflow, generate_samples, fit_lognormal, run_sensitivity_analysis
 from ai_agent import create_ai_agent_interface
@@ -152,10 +153,14 @@ def main():
             with col1:
                 if st.button("🚀 Run Simulation", type="primary", use_container_width=True):
                     with st.spinner("Running simulation..."):
+                        # Set random seed for reproducibility
+                        np.random.seed(settings.get("random_seed", 42))
+                        
                         correlations = settings["correlations"]
                         probabilities = []
                         success_data_by_corr = {}
                         last_fitted_model = None
+                        total_skipped = 0
                         
                         # Progress bar
                         progress_bar = st.progress(0)
@@ -164,7 +169,7 @@ def main():
                         for i, rho in enumerate(correlations):
                             status_text.text(f"Processing correlation {rho:.2f}...")
                             
-                            prob, last_fitted_model, success_counts = simulate_workflow(
+                            prob, last_fitted_model, success_counts, skipped = simulate_workflow(
                                 results, df, settings["top_x_percent"], settings["step1_keep"],
                                 settings["step2_keep"], settings["step3_keep"], rho,
                                 settings["n_rep"], settings["dist_method"],
@@ -173,6 +178,7 @@ def main():
                             )
                             probabilities.append(prob)
                             success_data_by_corr[rho] = success_counts
+                            total_skipped += skipped
                             
                             progress_bar.progress((i + 1) / len(correlations))
                         
@@ -186,11 +192,21 @@ def main():
                             "correlations": [float(c) for c in correlations],
                             "last_fitted_model": last_fitted_model,
                             "results": results,
-                            "step2_keep": settings["step3_keep"],
-                            "settings": settings
+                            "step2_keep": settings["step2_keep"],
+                            "settings": settings,
+                            "df": df
                         })
                         
                         st.success("✅ Simulation completed successfully!")
+                        
+                        # Warn if many iterations were skipped
+                        total_iters = len(correlations) * settings["n_rep"]
+                        if total_skipped > 0:
+                            skip_pct = total_skipped / total_iters * 100
+                            if skip_pct > 10:
+                                st.warning(f"⚠️ {total_skipped:,} iterations ({skip_pct:.1f}%) were skipped due to filtering or errors. Results are based on fewer effective samples.")
+                            else:
+                                st.info(f"ℹ️ {total_skipped:,} iterations ({skip_pct:.1f}%) skipped.")
             
             with col2:
                 st.markdown("""
@@ -259,7 +275,7 @@ def main():
                     settings_2step["workflow_steps"] = 2
                     settings_2step["step3_keep"] = settings_2step["step2_keep"]
                     
-                    prob_2step, _, _ = simulate_workflow(
+                    prob_2step, _, _, _ = simulate_workflow(
                         results, df, settings["top_x_percent"], settings["step1_keep"],
                         settings["step2_keep"], settings["step2_keep"], 0.5,
                         settings["n_rep"], settings["dist_method"],
@@ -267,7 +283,7 @@ def main():
                     )
                     
                     # 3-step workflow
-                    prob_3step, _, _ = simulate_workflow(
+                    prob_3step, _, _, _ = simulate_workflow(
                         results, df, settings["top_x_percent"], settings["step1_keep"],
                         settings["step2_keep"], settings["step3_keep"], 0.5,
                         settings["n_rep"], settings["dist_method"],
@@ -288,6 +304,7 @@ def main():
             if "probabilities" in st.session_state:
                 plot_correlation_heatmap(st.session_state)
                 plot_clone_selection_flow(st.session_state, settings)
+                plot_efficiency_metrics(settings)
         
         with tab5:
             # AI Agent Interface

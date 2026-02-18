@@ -50,6 +50,13 @@ def load_data(uploaded_file):
         # Display data summary
         display_data_summary(df, selected_sheet, criteria_columns)
         
+        # Show data-driven recommendations in sidebar
+        recommendations = get_data_recommendations(df, criteria_columns)
+        if recommendations:
+            st.sidebar.markdown("### 💡 Recommendations")
+            for rec in recommendations:
+                st.sidebar.markdown(rec)
+        
         return df, selected_sheet, criteria_columns
         
     except Exception as e:

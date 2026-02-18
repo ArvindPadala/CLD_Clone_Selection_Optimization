@@ -55,7 +55,7 @@ def simulate_workflow(real_data, df, top_x_percent, step1_keep, step2_keep, step
     Simulate clone selection workflow with Monte Carlo approach.
     
     Returns:
-        success_probability, fitted_model, success_counts
+        tuple: (success_probability, fitted_model, success_counts, skipped_count)
     """
     real_data = np.array(real_data).flatten()
     
@@ -77,6 +77,7 @@ def simulate_workflow(real_data, df, top_x_percent, step1_keep, step2_keep, step
     
     success_count = 0
     success_counts = []
+    skipped_count = 0
     
     # Calculate cutoff for top X%
     cutoff = np.percentile(real_data, 100 - top_x_percent)
@@ -91,6 +92,7 @@ def simulate_workflow(real_data, df, top_x_percent, step1_keep, step2_keep, step
                 filter_mask = apply_criteria_filter(df, criteria_settings, np.arange(len(df)))
                 assay_f = assay_f[filter_mask]
                 if len(assay_f) < step1_keep:
+                    skipped_count += 1
                     continue
             
             # Select top clones from step 1
@@ -102,6 +104,7 @@ def simulate_workflow(real_data, df, top_x_percent, step1_keep, step2_keep, step
             assay_g = correlation * top1_f + np.sqrt(1 - correlation**2) * noise1
             
             if len(assay_g) < step2_keep:
+                skipped_count += 1
                 continue
             
             # Select top clones from step 2
@@ -114,6 +117,7 @@ def simulate_workflow(real_data, df, top_x_percent, step1_keep, step2_keep, step
                 assay_h = correlation * top2_f + np.sqrt(1 - correlation**2) * noise2
                 
                 if len(assay_h) < step3_keep:
+                    skipped_count += 1
                     continue
                 
                 final_idx = np.argsort(assay_h)[-step3_keep:]
@@ -133,6 +137,7 @@ def simulate_workflow(real_data, df, top_x_percent, step1_keep, step2_keep, step
                     mask = apply_criteria_filter(df, criteria_settings, original_indices)
                 
                 if not all(mask):
+                    skipped_count += 1
                     continue
             
             # Count successful clones
@@ -143,12 +148,13 @@ def simulate_workflow(real_data, df, top_x_percent, step1_keep, step2_keep, step
             if count_success == step3_keep:
                 success_count += 1
                 
-        except Exception as e:
-            # Skip this iteration if there's an error
+        except Exception:
+            skipped_count += 1
             continue
     
-    success_probability = success_count / n_rep if n_rep > 0 else 0
-    return success_probability, fitted_model, success_counts
+    effective_reps = n_rep - skipped_count
+    success_probability = success_count / effective_reps if effective_reps > 0 else 0
+    return success_probability, fitted_model, success_counts, skipped_count
 
 def run_sensitivity_analysis(results, df, settings, correlations):
     """
@@ -194,7 +200,7 @@ def run_sensitivity_analysis(results, df, settings, correlations):
                 test_settings['step3_keep'] = min(test_settings['step3_keep'], param_value)
             
             try:
-                prob, _, _ = simulate_workflow(
+                prob, _, _, _ = simulate_workflow(
                     results, df, test_settings['top_x_percent'],
                     test_settings['step1_keep'], test_settings['step2_keep'],
                     test_settings['step3_keep'], correlation, 1000,  # Reduced n_rep for speed
